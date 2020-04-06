@@ -1,0 +1,13 @@
+{
+  "scriptFile": "__init__.py",
+  "bindings": [
+    {
+      "name": "myeventtimer",
+      "type": "timerTrigger",
+      "direction": "in",
+      "schedule": "%ScheduleAppSetting%",
+      "runOnStartup" : false,
+      "useMonitor": true
+    }
+  ]
+}
