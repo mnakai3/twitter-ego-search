@@ -29,7 +29,7 @@ client = slack.WebClient(slack_token)
 twitter_search_since = (datetime.now(JST) - timedelta(minutes=5)).strftime("%Y-%m-%d_%H:%M:%S_JST")
 twitter_search_until = datetime.now(JST).strftime("%Y-%m-%d_%H:%M:%S_JST")
 
-def twitter_search(keywords):
+def twitter_search(keywords, lang):
     global twitter_search_since
     global twitter_search_until
 
@@ -41,10 +41,13 @@ def twitter_search(keywords):
     params = {
         "q": query_str,
         "count": 5,
-        "lang": "ja",
+        "lang": lang,
         "result_type": "recent",
         "modules": "status"
     }
+
+    if not lang:
+        del params["lang"]
 
     twitter_search_url = "https://api.twitter.com/1.1/search/tweets.json"
     logging.debug('>>> Twitter search start! - %s', params)
@@ -81,7 +84,7 @@ def get_permalink_by_tweet(tweets):
     return permalinks
 
 def main(myeventtimer: func.TimerRequest) -> None:
-    logging.info('twitter ego-searching function v0.4')
+    logging.info('twitter ego-searching function v0.5')
     utc_timestamp = datetime.utcnow().replace(
         tzinfo=timezone.utc).isoformat()
 
@@ -100,8 +103,13 @@ def main(myeventtimer: func.TimerRequest) -> None:
     query_keywords = table_service.query_entities('TwitterEgoSearch', filter="PartitionKey eq 'Keyword'")
     filtering_users = table_service.query_entities('TwitterEgoSearch', filter="PartitionKey eq 'FilterUser'")
     for keyword in query_keywords:
-        tweets = twitter_search(keyword['RowKey'])
+        tweets = twitter_search(keyword['RowKey'], 'ja')
         tweets = tweet_filter_by_user(tweets, filtering_users)
+        permalinks.extend(get_permalink_by_tweet(tweets))
+
+    timelines = table_service.query_entities('TwitterEgoSearch', filter="PartitionKey eq 'Timeline'")
+    for user in timelines:
+        tweets = twitter_search('from:' + user['RowKey'], '')
         permalinks.extend(get_permalink_by_tweet(tweets))
 
     twitter_search_since = twitter_search_until
