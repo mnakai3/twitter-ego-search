@@ -16,6 +16,7 @@ table_storage_name = os.getenv("TABLE_STORAGE_NAME")
 table_storage_key = os.getenv("TABLE_STORAGE_KEY")
 table_service = TableService(account_name=table_storage_name, account_key=table_storage_key)
 
+nr_tweets = os.getenv("NR_TWEETS")
 twitter_ck = os.getenv("TWITTER_CK")
 twitter_cs = os.getenv("TWITTER_CS")
 twitter_at = os.getenv("TWITTER_AT")
@@ -40,7 +41,7 @@ def twitter_search(keywords, lang):
 
     params = {
         "q": query_str,
-        "count": 5,
+        "count": nr_tweets,
         "lang": lang,
         "result_type": "recent",
         "modules": "status"
