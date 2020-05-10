@@ -85,7 +85,7 @@ def get_permalink_by_tweet(tweets):
     return permalinks
 
 def main(myeventtimer: func.TimerRequest) -> None:
-    logging.info('twitter ego-searching function v0.5')
+    logging.info('twitter ego-searching function v0.6')
     utc_timestamp = datetime.utcnow().replace(
         tzinfo=timezone.utc).isoformat()
 
