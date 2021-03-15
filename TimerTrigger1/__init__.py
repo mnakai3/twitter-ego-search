@@ -72,10 +72,15 @@ def twitter_search(keywords, lang):
         return []
 
 def tweet_filter_by_user(tweets, users):
+    droplist = []
     for user in users:
         for i, tweet in enumerate(tweets):
             if tweet['user']['screen_name'] == user['RowKey']:
-                del tweets[i]
+                droplist.append(i)
+    delcnt = 0
+    for id in droplist:
+        del tweets[id - delcnt]
+        delcnt += 1
     return tweets
 
 def get_permalink_by_tweet(tweets):
