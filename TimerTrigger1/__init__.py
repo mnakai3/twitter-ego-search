@@ -77,6 +77,9 @@ def tweet_filter_by_user(tweets, users):
         for i, tweet in enumerate(tweets):
             if tweet['user']['screen_name'] == user['RowKey']:
                 droplist.append(i)
+                continue
+            if user['RowKey'] in tweet['text']:
+                droplist.append(i)
     delcnt = 0
     for id in droplist:
         del tweets[id - delcnt]
