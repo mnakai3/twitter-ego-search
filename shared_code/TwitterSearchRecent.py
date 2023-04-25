@@ -8,10 +8,8 @@ bearer_token = os.environ.get("BEARER_TOKEN")
 
 # Optional params: start_time,end_time,since_id,until_id,max_results,next_token,
 # expansions,tweet.fields,media.fields,poll.fields,place.fields,user.fields
-default_query_params = 'lang:ja -is:retweet'
-query_keywords = ''
 query_params = {
-    'query': default_query_params,
+    'query': 'lang:ja -is:retweet',
     'tweet.fields': 'author_id',
     'expansions': 'author_id',
     'max_results': 10 # between 10 and 100
@@ -63,8 +61,7 @@ def get_permalinks(excludes_users=''):
         return permalinks
 
     for t in query_response['data']:
-        author_id = t['author_id']
-        username = get_username(author_id)
+        username = get_username(t['author_id'])
         if username in excludes_users:
             continue
         permalinks.append('https://twitter.com/' + username + '/status/' + t['id'])
