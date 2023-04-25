@@ -128,3 +128,7 @@ obj
 appsettings.json
 local.settings.json
 .python_packages
+
+# azurite
+__azurite_db_*
+__blobstorage__
