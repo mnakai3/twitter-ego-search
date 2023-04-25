@@ -1,128 +1,57 @@
 import os
-import json
-import time
-from datetime import datetime, timedelta, timezone
 import logging
-import slack
-from requests_oauthlib import OAuth1Session
+import json
+from datetime import datetime, timezone, timedelta
 import azure.functions as func
-from azure.cosmosdb.table.tableservice import TableService
-from azure.cosmosdb.table.models import Entity
-from requests.exceptions import Timeout
 
-JST = timezone(timedelta(hours=+9), "JST")
+VERSION = '2.0-rc4'
 
-table_storage_name = os.getenv("TABLE_STORAGE_NAME")
-table_storage_key = os.getenv("TABLE_STORAGE_KEY")
-table_service = TableService(account_name=table_storage_name, account_key=table_storage_key)
-
-nr_tweets = os.getenv("NR_TWEETS")
-twitter_ck = os.getenv("TWITTER_CK")
-twitter_cs = os.getenv("TWITTER_CS")
-twitter_at = os.getenv("TWITTER_AT")
-twitter_as = os.getenv("TWITTER_AS")
-twitter = OAuth1Session(twitter_ck, twitter_cs, twitter_at, twitter_as)
-
+import slack
 slack_token = os.getenv("SLACK_TOKEN")
 slack_channel_id = os.getenv("SLACK_CHANNEL_ID")
-client = slack.WebClient(slack_token)
+slack_client = slack.WebClient(slack_token)
 
-twitter_search_since = (datetime.now(JST) - timedelta(minutes=5)).strftime("%Y-%m-%d_%H:%M:%S_JST")
-twitter_search_until = datetime.now(JST).strftime("%Y-%m-%d_%H:%M:%S_JST")
+from shared_code import AzureBlobStorage as storage
+storage.table_name = 'TwitterEgoSearch'
+storage.account_name = os.getenv("TABLE_STORAGE_NAME")
+storage.account_key = os.getenv("TABLE_STORAGE_KEY")
 
-def twitter_search(keywords, lang):
-    global twitter_search_since
-    global twitter_search_until
+from shared_code import TwitterSearchRecent as tsr
+tsr.bearer_token = os.getenv("BEARER_TOKEN")
+nr_max_results = os.getenv("NR_MAX_RESULTS", default=10)
 
-    query_str = keywords + " " \
-        "-RT " \
-        "since:" + twitter_search_since + " " \
-        "until:" + twitter_search_until
-
-    params = {
-        "q": query_str,
-        "count": nr_tweets,
-        "lang": lang,
-        "result_type": "recent",
-        "modules": "status"
-    }
-
-    if not lang:
-        del params["lang"]
-
-    twitter_search_url = "https://api.twitter.com/1.1/search/tweets.json"
-    logging.debug('>>> Twitter search start! - %s', params)
-    for i in range(3):
-        try:
-            req = twitter.get(twitter_search_url, params = params, timeout=(3.0, 5.0))
-        except Exception as e:
-            logging.error('twitter search exception: %s', e)
-        else:
-            break
-    else:
-        logging.error('twitter search failed: %s', query_str)
-        return []
-    logging.debug('<<< Wwitter search stop!')
-
-    if req.status_code == 200:
-        tweets = json.loads(req.text)['statuses']
-        return tweets
-    else:
-        logging.error('twitter search failed.')
-        return []
-
-def tweet_filter_by_user(tweets, users):
-    droplist = []
-    for user in users:
-        for i, tweet in enumerate(tweets):
-            if tweet['user']['screen_name'] == user['RowKey']:
-                droplist.append(i)
-                continue
-            if '@' + user['RowKey'] in tweet['text']:
-                droplist.append(i)
-    delcnt = 0
-    for id in droplist:
-        del tweets[id - delcnt]
-        delcnt += 1
-    return tweets
-
-def get_permalink_by_tweet(tweets):
-    permalinks = []
-    for tweet in tweets:
-        permalinks.append('https://twitter.com/' + tweet['user']['screen_name'] + '/status/' + tweet['id_str'])
-    return permalinks
 
 def main(myeventtimer: func.TimerRequest) -> None:
-    logging.info('twitter ego-searching function v0.8')
-    utc_timestamp = datetime.utcnow().replace(
-        tzinfo=timezone.utc).isoformat()
+    logging.basicConfig(level=logging.DEBUG)
+    logging.info(f'twitter ego-searching function v{VERSION}')
+    logging.info('Search for the period from {} to {}'.format(
+        (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec='seconds').replace('+00:00', 'Z'),
+         datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')))
 
-    if myeventtimer.past_due:
-        logging.info('The timer is past due!')
+    # Twitter Search
+    excludes_users = storage.get_values_from('FilterUser')
+    search_keywords = storage.get_values_from('Keyword')
+    tsr.query_params['query'] = 'lang:ja -is:retweet'
+    for key in search_keywords:
+        tsr.append_query_keyword(f'"{key}"')
+    tsr.query_params['start_time'] = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec='seconds').replace('+00:00', 'Z')
+    tsr.query_params['max_results'] = nr_max_results
+    logging.info(f'{json.dumps(tsr.query_params, indent=2)}')
 
-    logging.info('Python timer trigger function ran at %s', utc_timestamp)
+    tsr.run()
+    permalinks = tsr.get_permalinks(excludes_users=excludes_users)
 
-    global twitter_search_since
-    global twitter_search_until
-    twitter_search_until = datetime.now(JST).strftime("%Y-%m-%d_%H:%M:%S_JST")
-    logging.info('time range to Twitter search: since %s, until %s',
-                    twitter_search_since, twitter_search_until)
+    # Twitter Timeline
+    search_timeline = storage.get_values_from('Timeline')
+    tsr.query_params['query'] = '-is:retweet'
+    for key in search_timeline:
+        tsr.append_query_keyword(f'from:{key}')
+    logging.info(f'{json.dumps(tsr.query_params, indent=2)}')
 
-    permalinks = []
-    query_keywords = table_service.query_entities('TwitterEgoSearch', filter="PartitionKey eq 'Keyword'")
-    filtering_users = table_service.query_entities('TwitterEgoSearch', filter="PartitionKey eq 'FilterUser'")
-    for keyword in query_keywords:
-        tweets = twitter_search(keyword['RowKey'], 'ja')
-        tweets = tweet_filter_by_user(tweets, filtering_users)
-        permalinks.extend(get_permalink_by_tweet(tweets))
+    tsr.run()
+    permalinks += tsr.get_permalinks()
 
-    timelines = table_service.query_entities('TwitterEgoSearch', filter="PartitionKey eq 'Timeline'")
-    for user in timelines:
-        tweets = twitter_search('from:' + user['RowKey'], '')
-        permalinks.extend(get_permalink_by_tweet(tweets))
-
-    twitter_search_since = twitter_search_until
-
-    for url in set(permalinks):
-        logging.info('Permalink: %s', url)
-        client.chat_postMessage(channel=slack_channel_id, text=url)
+    # Slack send
+    for link in set(permalinks):
+        logging.info(f'Permalink: {link}')
+        slack_client.chat_postMessage(channel=slack_channel_id, text=link)
